@@ -53,6 +53,9 @@ public final class AccessorFactory {
 
 
     public static @NotNull InstanceCheck getInstanceCheck(final @NotNull ClassLoader classLoader, final @NotNull Class<?> type) throws IllegalAccessException {
+        if (type == Object.class) {
+            throw new IllegalArgumentException("Cannot generate InstanceCheck for type Object.");
+        }
         if (isPrimitive(type)) {
             throw new IllegalArgumentException("Cannot generate instanceof check for primitive types");
         }

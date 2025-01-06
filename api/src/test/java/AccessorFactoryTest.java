@@ -16,6 +16,12 @@ public class AccessorFactoryTest {
         } catch (IllegalAccessException ignore) {
 
         }
+        try {
+            AccessorFactory.getInstanceCheck(Object.class);
+            Assertions.fail("Should throw IllegalArgumentException. Because cannot generate InstanceCheck for Object.class");
+        } catch (IllegalArgumentException ignore) {
+
+        }
         final @NotNull InstanceCheck check = AccessorFactory.getInstanceCheck(InstanceCheck.class.getClassLoader(), String.class);
         Assertions.assertEquals(check, AccessorFactory.getInstanceCheck(InstanceCheck.class.getClassLoader(), String.class));
         Assertions.assertEquals(check.getTargetClass(), String.class);
