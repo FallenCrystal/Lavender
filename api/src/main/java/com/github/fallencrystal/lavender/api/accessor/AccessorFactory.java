@@ -10,6 +10,7 @@ import net.bytebuddy.implementation.bytecode.ByteCodeAppender;
 import net.bytebuddy.implementation.bytecode.StackManipulation;
 import net.bytebuddy.implementation.bytecode.member.MethodReturn;
 import net.bytebuddy.implementation.bytecode.member.MethodVariableAccess;
+import net.bytebuddy.jar.asm.Label;
 import net.bytebuddy.matcher.ElementMatchers;
 import org.jetbrains.annotations.NotNull;
 
@@ -75,20 +76,30 @@ public final class AccessorFactory {
                 .method(ElementMatchers.named("getTargetClass"))
                 .intercept(FixedValue.value(clazz))
                 .method(ElementMatchers.named("isInstance"))
-                .intercept(SimpleImplementation.of(((methodVisitor, context, methodDescription) -> {
-                    final @NotNull StackManipulation stackManipulation = new StackManipulation.Compound(
-                            MethodVariableAccess.REFERENCE.loadFrom(1),
-                            net.bytebuddy.implementation.bytecode.assign.InstanceCheck.of(TypeDescription.ForLoadedType.of(clazz)),
-                            MethodReturn.INTEGER
-                    );
-                    final @NotNull StackManipulation.Size size = stackManipulation.apply(methodVisitor, context);
-                    return new ByteCodeAppender.Size(size.getMaximalSize(), methodDescription.getStackSize());
-                })))
+                .intercept(getInstanceOfMethod(clazz))
                 .make()
                 .load(classLoader)
                 .getLoaded()
                 .getDeclaredConstructor()
                 .newInstance();
+    }
+
+    static @NotNull Label[] createLabelArray(int size) {
+        final Label[] labels = new Label[size];
+        for (int i = 0; i < size; i++) labels[i] = new Label();
+        return labels;
+    }
+
+    static @NotNull SimpleImplementation getInstanceOfMethod(final @NotNull Class<?> classToCheck) {
+        return SimpleImplementation.of(((methodVisitor, context, methodDescription) -> {
+            final @NotNull StackManipulation stackManipulation = new StackManipulation.Compound(
+                    MethodVariableAccess.REFERENCE.loadFrom(1),
+                    net.bytebuddy.implementation.bytecode.assign.InstanceCheck.of(TypeDescription.ForLoadedType.of(classToCheck)),
+                    MethodReturn.INTEGER
+            );
+            final @NotNull StackManipulation.Size size = stackManipulation.apply(methodVisitor, context);
+            return new ByteCodeAppender.Size(size.getMaximalSize(), methodDescription.getStackSize());
+        }));
     }
     
 }

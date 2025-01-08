@@ -9,10 +9,10 @@ import java.lang.annotation.Target;
 
 @SuppressWarnings("unused")
 public interface IAccessor {
-    @InternalImplement @NotNull Object getObject();
-    @InternalImplement @NotNull Class<?> getTargetClass();
+    @SafetyIgnore @NotNull Object getObject();
+    @SafetyIgnore @NotNull Class<?> getTargetClass();
 
     @Retention(RetentionPolicy.RUNTIME)
     @Target(ElementType.METHOD)
-    @interface InternalImplement {}
+    @interface SafetyIgnore {}
 }

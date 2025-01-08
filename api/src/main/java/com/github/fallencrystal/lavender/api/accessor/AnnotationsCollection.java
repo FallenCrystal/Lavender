@@ -6,12 +6,18 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.lang.annotation.Annotation;
+
 @ApiStatus.Internal
 @SuppressWarnings("unused")
 public interface AnnotationsCollection {
-    @NotNull AnnotationDescription NOT_NULL = AnnotationDescription.Builder.ofType(NotNull.class).build();
-    @NotNull AnnotationDescription NULL_ABLE = AnnotationDescription.Builder.ofType(Nullable.class).build();
-    @NotNull AnnotationDescription RUNTIME_GENERATED = AnnotationDescription.Builder.ofType(RuntimeGenerated.class).build();
-    @NotNull AnnotationDescription API_INTERNAL = AnnotationDescription.Builder.ofType(ApiStatus.Internal.class).build();
-    @NotNull AnnotationDescription API_EXPERIMENTAL = AnnotationDescription.Builder.ofType(ApiStatus.Experimental.class).build();
+    @NotNull AnnotationDescription NOT_NULL = empty(NotNull.class);
+    @NotNull AnnotationDescription NULL_ABLE = empty(Nullable.class);
+    @NotNull AnnotationDescription RUNTIME_GENERATED = empty(RuntimeGenerated.class);
+    @NotNull AnnotationDescription API_INTERNAL = empty(ApiStatus.Internal.class);
+    @NotNull AnnotationDescription API_EXPERIMENTAL = empty(ApiStatus.Experimental.class);
+
+    static @NotNull AnnotationDescription empty(final @NotNull Class<? extends Annotation> annotationClass) {
+        return AnnotationDescription.Builder.ofType(annotationClass).build();
+    }
 }

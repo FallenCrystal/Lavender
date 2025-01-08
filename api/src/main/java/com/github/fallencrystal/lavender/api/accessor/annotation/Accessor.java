@@ -17,7 +17,15 @@ public @interface Accessor {
     @Target(ElementType.METHOD)
     @interface TypeIndex {
         int value();
-        boolean declared() default true;
+        boolean declared() default false;
+        @NotNull TargetType targetType() default TargetType.METHOD;
+    }
+
+    @Retention(RetentionPolicy.RUNTIME)
+    @Target(ElementType.METHOD)
+    @interface NamedTarget {
+        @NotNull String value() default "";
+        boolean declared() default false;
         @NotNull TargetType targetType() default TargetType.METHOD;
     }
 

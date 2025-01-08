@@ -8,21 +8,21 @@ import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.NamingStrategy;
 import net.bytebuddy.description.modifier.Visibility;
 import net.bytebuddy.description.type.TypeDescription;
+import net.bytebuddy.dynamic.DynamicType;
 import net.bytebuddy.implementation.FieldAccessor;
 import net.bytebuddy.implementation.FixedValue;
 import net.bytebuddy.implementation.MethodCall;
 import net.bytebuddy.implementation.bytecode.ByteCodeAppender;
-import net.bytebuddy.jar.asm.Label;
 import net.bytebuddy.jar.asm.Opcodes;
 import net.bytebuddy.matcher.ElementMatchers;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.lang.annotation.Annotation;
 import java.lang.invoke.*;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.util.Arrays;
-import java.util.Objects;
+import java.util.*;
 import java.util.function.Function;
 
 class AccessorClassBuilder<T extends IAccessor> {
@@ -42,23 +42,29 @@ class AccessorClassBuilder<T extends IAccessor> {
     private final @NotNull Field[] targetFields, targetDeclaredFields;
 
     protected AccessorClassBuilder(@NotNull Class<T> accessor) {
+        if (!accessor.isInterface()) throw new IllegalArgumentException("Accessor must be an interface");
         this.accessor = accessor;
         final Accessor annotation = accessor.getAnnotation(Accessor.class);
         if (annotation == null) throw new IllegalArgumentException("Accessor is missing @Accessor annotation");
-        if (annotation.value() == Object.class) {
-            if (annotation.className().isEmpty()) throw new IllegalArgumentException("Accessor is missing target. Please specify target class or class name.");
-            try {
-                this.targetClass = Class.forName(annotation.className(), true, accessor.getClassLoader());
-            } catch (ClassNotFoundException e) {
-                throw new IllegalArgumentException("Cannot found target class " + annotation.className() + ". Make sure accessor's ClassLoader can access target class.", e);
-            }
-        } else {
-            this.targetClass = annotation.value();
-        }
+        this.targetClass = getClass(accessor, annotation);
         this.targetMethods = targetClass.getMethods();
         this.targetFields = targetClass.getDeclaredFields();
         this.targetDeclaredMethods = targetClass.getDeclaredMethods();
         this.targetDeclaredFields = targetClass.getDeclaredFields();
+    }
+
+    private Class<?> getClass(final @NotNull Class<? extends IAccessor> accessor, final @NotNull Accessor annotation) {
+        if (annotation.value() == Object.class) {
+            if (annotation.className().isEmpty()) {
+                throw new IllegalArgumentException("Accessor is missing target. Please specify target class or class name.");
+            }
+            try {
+                return Class.forName(annotation.className(), true, accessor.getClassLoader());
+            } catch (ClassNotFoundException e) {
+                throw new IllegalArgumentException("Cannot found target class " + annotation.className() + ". Make sure accessor's ClassLoader can access target class.", e);
+            }
+        }
+        return annotation.value();
     }
 
     @SneakyThrows
@@ -87,57 +93,53 @@ class AccessorClassBuilder<T extends IAccessor> {
                 .intercept(SimpleImplementation.of(((methodVisitor, context, methodDescription) -> {
                     final @NotNull var field = Objects.requireNonNull(context.getInstrumentedType().getDeclaredFields().getFirst(), "cannot found field");
                     final @NotNull var type = field.getDeclaringType();
-                    final @NotNull Label labelB = new Label();
-                    final @NotNull Label labelC = new Label();
+                    new SimpleByteCodeWriter(methodVisitor, 4)
+                            .callObjectInit()
+                            .aload(1)
+                            .instanceOf(type.getInternalName())
+                            .ifeq(1)
+                            .aload(0, 1)
+                            .checkCast(type.getInternalName())
+                            .putField(
+                                    context.getInstrumentedType().getInternalName(),
+                                    field.getInternalName(),
+                                    type.getInternalName()
+                            )
+                            .gotoLabel(3)
+                            .visitLabel(0)
+                            .newAndDup("java/lang/IllegalArgumentException")
+                            .newAndDup("java/lang/StringBuilder")
+                            .invokeInit("java/lang/StringBuilder")
+                            .invokeStringAppend("Except " + targetClass.getName() + " but was found ")
+                            .aload(1)
+                            .invokeObjectAppend()
+                            .invokeStringAppend(" (")
+                            .aload(1)
+                            .ifnonnull(1)
+                            .ldc("null")
+                            .gotoLabel(2)
+                            .visitLabel(1)
+                            .aload(1)
+                            .popAsClassName()
+                            .visitLabel(2)
+                            .invokeObjectAppend()
+                            .invokeStringAppend(")")
+                            .invokeVirtual("java/lang/StringBuilder", "toString", "()Ljava/lang/String;")
+                            .invokeInit("java/lang/IllegalArgumentException", "Ljava/lang/String;")
+                            .athrow()
+                            .labelWithReturn(3);
 
-                    // A label -  Call super init and check instanceof
-                    methodVisitor.visitVarInsn(Opcodes.ALOAD, 0);
-                    methodVisitor.visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object",
-                            "<init>", "()V", false);
-                    methodVisitor.visitVarInsn(Opcodes.ALOAD, 1); // Load constructor argument
-                    methodVisitor.visitTypeInsn(Opcodes.INSTANCEOF, type.getInternalName()); // Do instanceof check
-                    methodVisitor.visitJumpInsn(Opcodes.IFEQ, labelB); // If failed instanceof check, Goto B
-                    // Put cast result to field
-                    methodVisitor.visitVarInsn(Opcodes.ALOAD, 0); // Load this
-                    methodVisitor.visitVarInsn(Opcodes.ALOAD, 1); // Load constructor argument
-                    // Force cast & put field
-                    methodVisitor.visitTypeInsn(Opcodes.CHECKCAST, type.getInternalName());
-                    methodVisitor.visitFieldInsn(Opcodes.PUTFIELD, context.getInstrumentedType().getInternalName(),
-                            field.getInternalName(), type.getInternalName());
-                    // goto C (return) to skipping B label
-                    methodVisitor.visitJumpInsn(Opcodes.GOTO, labelC);
-
-                    // B label - throw exception because failed instanceof check at A label
-                    final @NotNull String sb = "java/lang/StringBuilder";
-                    methodVisitor.visitLabel(labelB);
-                    // throw new IllegalArgumentException("Except string but was found " + v1);
-                    methodVisitor.visitTypeInsn(Opcodes.NEW, "java/lang/IllegalArgumentException");
-                    methodVisitor.visitInsn(Opcodes.DUP);
-                    methodVisitor.visitTypeInsn(Opcodes.NEW, sb);
-                    methodVisitor.visitInsn(Opcodes.DUP);
-                    methodVisitor.visitMethodInsn(Opcodes.INVOKESPECIAL, sb, "<init>", "()V", false);
-                    methodVisitor.visitLdcInsn("Except string but was found ");
-                    methodVisitor.visitMethodInsn(Opcodes.INVOKEVIRTUAL, sb, "append", "(Ljava/lang/String;)L" + sb + ";", false);
-                    methodVisitor.visitVarInsn(Opcodes.ALOAD, 1);
-                    methodVisitor.visitMethodInsn(Opcodes.INVOKEVIRTUAL, sb, "append", "(Ljava/lang/Object;)L" + sb + ";", false);
-                    methodVisitor.visitMethodInsn(Opcodes.INVOKEVIRTUAL, sb, "toString", "()Ljava/lang/String;", false);
-                    methodVisitor.visitMethodInsn(
-                            Opcodes.INVOKESPECIAL, "java/lang/IllegalArgumentException",
-                            "<init>", "(Ljava/lang/String;)V", false);
-                    methodVisitor.visitInsn(Opcodes.ATHROW);
-
-                    // C return
-                    methodVisitor.visitLabel(labelC);
-                    methodVisitor.visitInsn(Opcodes.RETURN);
-
-                    return new ByteCodeAppender.Size(3, 2);
+                    return new ByteCodeAppender.Size(17, 2);
                 })))
                 .method(ElementMatchers.anyOf(ACCESSOR_OBJECT_GETTER))
                 .intercept(FieldAccessor.ofField("targetInstance"))
                 .method(ElementMatchers.anyOf(ACCESSOR_TARGET_CLASS_GETTER))
                 .intercept(FixedValue.value(targetClass));
 
-        // TODO
+        for (Method method : accessor.getDeclaredMethods()) {
+            if (method.isAnnotationPresent(IAccessor.SafetyIgnore.class)) continue;
+            visitAccessorMethod(definition, method);
+        }
 
         // Load and make constructor function
         final @NotNull Class<? extends T> loaded = definition
@@ -161,7 +163,9 @@ class AccessorClassBuilder<T extends IAccessor> {
         return function;
     }
 
-    private void visitAccessorMethod(final @NotNull Method method) {
+    private void visitAccessorMethod(
+            final @NotNull DynamicType.Builder.MethodDefinition.ReceiverTypeDefinition<T> definition,
+            final @NotNull Method method) {
         final @NotNull Class<?> returnType = method.getReturnType();
         final boolean isVoid = returnType == void.class;
         Object object = null;
@@ -258,6 +262,28 @@ class AccessorClassBuilder<T extends IAccessor> {
             final boolean notNull = primitive || field.isAnnotationPresent(NotNull.class);
             final boolean nullable = !notNull && field.isAnnotationPresent(Nullable.class);
             return new IndexedData(field, index, type, field.getName(), EMPTY_PARAMETER, primitive, notNull, nullable);
+        }
+    }
+
+    private interface TargetAccessor {
+        boolean has(final @NotNull Class<? extends Annotation> annotation);
+        <T extends Annotation> @Nullable T get(final @NotNull Class<T> annotation);
+        @NotNull Class<?> type();
+
+        static @NotNull TargetAccessor of(final @NotNull Method method) {
+            return new TargetAccessor() {
+                @Override public boolean has(@NotNull Class<? extends Annotation> annotation) { return method.isAnnotationPresent(annotation); }
+                @Override public <T extends Annotation> @Nullable T get(final @NotNull Class<T> annotation) { return method.getAnnotation(annotation); }
+                public @NotNull Class<?> type() { return method.getReturnType(); }
+            };
+        }
+
+        static @NotNull TargetAccessor of(final @NotNull Field field) {
+            return new TargetAccessor() {
+                @Override public boolean has(@NotNull Class<? extends Annotation> annotation) { return field.isAnnotationPresent(annotation); }
+                @Override public <T extends Annotation> @Nullable T get(final @NotNull Class<T> annotation) { return field.getAnnotation(annotation); }
+                public @NotNull Class<?> type() { return field.getType(); }
+            };
         }
     }
 }
